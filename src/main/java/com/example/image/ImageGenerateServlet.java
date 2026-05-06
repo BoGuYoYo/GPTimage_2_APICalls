@@ -61,7 +61,7 @@ public class ImageGenerateServlet extends HttpServlet {
             """.formatted(mapper.writeValueAsString(prompt));
 
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create("https://www.kuyaoapi.com/v1/chat/completions"))
+                    .uri(URI.create("https://openai.com/v1/chat/completions"))
                     .header("Content-Type", "application/json")
                     .header("Authorization", "Bearer " + apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(payload, StandardCharsets.UTF_8))
