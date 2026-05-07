@@ -20,7 +20,7 @@
     const saveApiBtn = $("saveApiBtn");
     const statusEl = $("status");
     const errorEl = $("error");
-    const sourcePreviewEl = $("sourcePreview");
+    const sourcePreviewListEl = $("sourcePreviewList");
     const resultImgEl = $("resultImg");
     const rawOutputEl = $("rawOutput");
     const customSizeWrapEl = $("customSizeWrap");
@@ -33,7 +33,7 @@
 
     const requiredIds = [
         "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageFile",
-        "generateBtn", "cancelBtn", "downloadBtn", "saveApiBtn", "status", "error", "sourcePreview", "resultImg", "rawOutput",
+        "generateBtn", "cancelBtn", "downloadBtn", "saveApiBtn", "status", "error", "sourcePreviewList", "resultImg", "rawOutput",
         "customSizeWrap", "customWidth", "customHeight",
         "noticeMask", "noticeContent", "noticeCloseBtn"
     ];
@@ -58,12 +58,27 @@
         resultImgEl.style.display = "none";
     }
     function resetSourcePreview() {
-        sourcePreviewEl.src = "";
-        sourcePreviewEl.style.display = "none";
+        sourcePreviewListEl.innerHTML = "";
     }
-    function showSourcePreview(src) {
-        sourcePreviewEl.src = src;
-        sourcePreviewEl.style.display = "block";
+    function showSourcePreview(items) {
+        resetSourcePreview();
+        for (const it of items) {
+            const card = document.createElement("div");
+            card.className = "preview-item";
+
+            const img = document.createElement("img");
+            img.src = it.src;
+            img.alt = it.name || "参考图";
+
+            const cap = document.createElement("div");
+            cap.className = "cap";
+            cap.title = it.name || "";
+            cap.textContent = `${it.index}. ${it.name || "image"}`;
+
+            card.appendChild(img);
+            card.appendChild(cap);
+            sourcePreviewListEl.appendChild(card);
+        }
     }
     function showImage(src) {
         resultImgEl.src = src;
@@ -83,14 +98,18 @@
         if (mode === "variation") return `${apiBase}/v1/images/variations`;
         return `${apiBase}/v1/images/generations`;
     }
-    function getImageFileOrNull() {
-        const f = imageFileEl.files && imageFileEl.files[0];
-        return f || null;
+    function getImageFiles() {
+        const files = imageFileEl.files ? Array.from(imageFileEl.files) : [];
+        return files;
     }
-    function validateImageFile(file) {
-        if (!file) return "请上传参考图";
-        const okType = ["image/png", "image/jpeg", "image/webp"].includes(file.type);
-        if (!okType) return "仅支持 PNG/JPEG/WEBP 图片";
+    function validateImageFiles(files, mode) {
+        if (!files.length) return "请上传参考图";
+        if (mode === "variation" && files.length !== 1) return "参考图变体模式仅支持 1 张图片";
+        if (mode === "edit" && files.length > 16) return "图像编辑模式最多支持 16 张图片";
+        for (const file of files) {
+            const okType = ["image/png", "image/jpeg", "image/webp"].includes(file.type);
+            if (!okType) return "仅支持 PNG/JPEG/WEBP 图片";
+        }
         return "";
     }
     function readAsDataUrl(file) {
@@ -290,6 +309,7 @@
         const mode = modeEl.value;
         const needsImage = isImageToImageMode(mode);
         imageFileEl.disabled = !needsImage;
+        imageFileEl.multiple = mode === "edit";
         if (!needsImage) {
             imageFileEl.value = "";
             resetSourcePreview();
@@ -307,12 +327,13 @@
 
     imageFileEl.addEventListener("change", async () => {
         setError("");
-        const file = getImageFileOrNull();
-        if (!file) {
+        const mode = modeEl.value.trim() || "generation";
+        const files = getImageFiles();
+        if (!files.length) {
             resetSourcePreview();
             return;
         }
-        const err = validateImageFile(file);
+        const err = validateImageFiles(files, mode);
         if (err) {
             imageFileEl.value = "";
             resetSourcePreview();
@@ -320,8 +341,14 @@
             return;
         }
         try {
-            const dataUrl = await readAsDataUrl(file);
-            showSourcePreview(dataUrl);
+            const previews = await Promise.all(
+                files.map(async (f, idx) => ({
+                    src: await readAsDataUrl(f),
+                    name: f.name,
+                    index: idx + 1
+                }))
+            );
+            showSourcePreview(previews);
         } catch (e) {
             imageFileEl.value = "";
             resetSourcePreview();
@@ -345,7 +372,7 @@
         const quality = qualityEl.value.trim();
         const style = styleEl.value.trim();
         const response_format = responseFormatEl.value.trim();
-        const imageFile = getImageFileOrNull();
+        const imageFiles = getImageFiles();
 
         if (!apiBase) return setError("请输入 API Base，例如 https://api.openai.com");
         if (!apiKey) return setError("请输入 API Key");
@@ -355,7 +382,7 @@
         if (typeof size === "object" && size?.error) return setError(size.error);
 
         if (isImageToImageMode(mode)) {
-            const fileErr = validateImageFile(imageFile);
+            const fileErr = validateImageFiles(imageFiles, mode);
             if (fileErr) return setError(fileErr);
         }
 
@@ -363,7 +390,7 @@
 
         requestController = new AbortController();
         setGenerating(true);
-        setStatus(mode === "generation" ? "正在生成图片..." : "正在处理图片...");
+        setStatus(mode === "generation" ? "正在生成图片..." : `正在处理图片（${imageFiles.length || 1} 张）...`);
 
         try {
             let resp;
@@ -397,7 +424,9 @@
                 });
             } else {
                 const form = new FormData();
-                form.append("image", imageFile);
+                for (const file of imageFiles) {
+                    form.append("image", file);
+                }
                 form.append("model", model);
                 if (prompt) form.append("prompt", prompt);
                 if (size) form.append("size", size);
@@ -408,6 +437,8 @@
                     mode,
                     url,
                     model,
+                    image_count: imageFiles.length,
+                    image_names: imageFiles.map(f => f.name),
                     size: size || "",
                     quality: quality || "",
                     response_format: response_format || ""

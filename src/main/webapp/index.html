@@ -108,6 +108,33 @@
         }
         .custom-size.show { display: flex; }
         .custom-size .num-input { width: 120px; }
+        .preview-list {
+            margin-top: 8px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+            gap: 8px;
+        }
+        .preview-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 6px;
+            background: #fff;
+        }
+        .preview-item img {
+            width: 100%;
+            height: 72px;
+            object-fit: cover;
+            border-radius: 8px;
+            display: block;
+        }
+        .preview-item .cap {
+            margin-top: 4px;
+            font-size: 11px;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
 
         .result img {
             max-width: 100%;
@@ -217,8 +244,8 @@
             <label for="imageFile">参考图上传</label>
             <div>
                 <input id="imageFile" type="file" accept="image/png,image/jpeg,image/webp" />
-                <div class="hint">图像编辑/变体模式必传，支持 PNG/JPEG/WEBP。</div>
-                <img id="sourcePreview" alt="参考图预览" style="display:none;max-width:220px;margin-top:8px;border:1px solid #eee;border-radius:10px;" />
+                <div class="hint">编辑模式支持多图（最多 16 张，按选择顺序提交）；变体模式仅支持 1 张。</div>
+                <div id="sourcePreviewList" class="preview-list"></div>
             </div>
 
             <label for="size">尺寸</label>
