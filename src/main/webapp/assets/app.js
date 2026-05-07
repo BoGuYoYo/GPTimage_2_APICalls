@@ -5,6 +5,7 @@
     const apiBaseEl = $("apiBase");
     const apiKeyEl = $("apiKey");
     const modelEl = $("model");
+    const customModelEl = $("customModel");
     const modeEl = $("mode");
     const promptEl = $("prompt");
     const sizeEl = $("size");
@@ -14,19 +15,26 @@
     const imageFileEl = $("imageFile");
 
     const generateBtn = $("generateBtn");
+    const cancelBtn = $("cancelBtn");
     const downloadBtn = $("downloadBtn");
+    const saveApiBtn = $("saveApiBtn");
     const statusEl = $("status");
     const errorEl = $("error");
     const sourcePreviewEl = $("sourcePreview");
     const resultImgEl = $("resultImg");
     const rawOutputEl = $("rawOutput");
+    const customSizeWrapEl = $("customSizeWrap");
+    const customWidthEl = $("customWidth");
+    const customHeightEl = $("customHeight");
     const noticeMaskEl = $("noticeMask");
     const noticeContentEl = $("noticeContent");
     const noticeCloseBtnEl = $("noticeCloseBtn");
+    const API_STORAGE_KEY = "openai-image-local-api-v1";
 
     const requiredIds = [
-        "apiBase", "apiKey", "model", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageFile",
-        "generateBtn", "downloadBtn", "status", "error", "sourcePreview", "resultImg", "rawOutput",
+        "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageFile",
+        "generateBtn", "cancelBtn", "downloadBtn", "saveApiBtn", "status", "error", "sourcePreview", "resultImg", "rawOutput",
+        "customSizeWrap", "customWidth", "customHeight",
         "noticeMask", "noticeContent", "noticeCloseBtn"
     ];
     const missing = requiredIds.filter(id => !$(id));
@@ -40,6 +48,10 @@
     function setRaw(objOrText = "") {
         rawOutputEl.textContent =
             typeof objOrText === "string" ? objOrText : JSON.stringify(objOrText, null, 2);
+    }
+    function setGenerating(generating) {
+        generateBtn.disabled = !!generating;
+        cancelBtn.disabled = !generating;
     }
     function resetImage() {
         resultImgEl.src = "";
@@ -92,6 +104,60 @@
 
     function normalizeBase(url) {
         return (url || "").trim().replace(/\/+$/, "");
+    }
+    function getResolvedModel() {
+        const custom = String(customModelEl.value || "").trim();
+        if (custom) return custom;
+        const selectedValue = String(modelEl.value || "").trim();
+        if (selectedValue) return selectedValue;
+        const selected = modelEl.options && modelEl.selectedIndex >= 0
+            ? modelEl.options[modelEl.selectedIndex]
+            : null;
+        const optionText = String(selected?.value || selected?.text || "").trim();
+        return optionText;
+    }
+    function toPositiveInt(v) {
+        const n = Number(v);
+        if (!Number.isInteger(n) || n <= 0) return 0;
+        return n;
+    }
+    function toggleCustomSizeInput() {
+        const useCustom = sizeEl.value === "custom";
+        customSizeWrapEl.classList.toggle("show", useCustom);
+    }
+    function getResolvedSize() {
+        if (sizeEl.value !== "custom") return sizeEl.value.trim();
+        const w = toPositiveInt(customWidthEl.value);
+        const h = toPositiveInt(customHeightEl.value);
+        if (!w || !h) return { error: "请输入有效的自定义分辨率（宽和高都必须是正整数）" };
+        if (w < 64 || h < 64 || w > 4096 || h > 4096) {
+            return { error: "自定义分辨率范围需在 64 ~ 4096 之间" };
+        }
+        return `${w}x${h}`;
+    }
+    function saveApiConfig() {
+        const payload = {
+            apiBase: normalizeBase(apiBaseEl.value),
+            apiKey: apiKeyEl.value.trim()
+        };
+        localStorage.setItem(API_STORAGE_KEY, JSON.stringify(payload));
+    }
+    function loadApiConfig() {
+        try {
+            const raw = localStorage.getItem(API_STORAGE_KEY);
+            if (!raw) return;
+            const data = JSON.parse(raw);
+            if (data && typeof data === "object") {
+                if (typeof data.apiBase === "string" && data.apiBase.trim()) {
+                    apiBaseEl.value = data.apiBase.trim();
+                }
+                if (typeof data.apiKey === "string" && data.apiKey.trim()) {
+                    apiKeyEl.value = data.apiKey.trim();
+                }
+            }
+        } catch (_) {
+            localStorage.removeItem(API_STORAGE_KEY);
+        }
     }
 
     function guessExtFromImageSrc(src) {
@@ -185,6 +251,17 @@
         }
     }
     noticeCloseBtnEl.addEventListener("click", () => noticeMaskEl.classList.remove("show"));
+    sizeEl.addEventListener("change", toggleCustomSizeInput);
+
+    saveApiBtn.addEventListener("click", () => {
+        setError("");
+        try {
+            saveApiConfig();
+            setStatus("API Base 与 API Key 已保存到本地。");
+        } catch (e) {
+            setError(`本地API保存失败：${e?.message || String(e)}`);
+        }
+    });
 
     downloadBtn.addEventListener("click", async () => {
         setError("");
@@ -217,6 +294,15 @@
             imageFileEl.value = "";
             resetSourcePreview();
         }
+    });
+
+    let requestController = null;
+    cancelBtn.addEventListener("click", () => {
+        if (!requestController) return;
+        requestController.abort();
+        requestController = null;
+        setStatus("已取消当前请求。");
+        setGenerating(false);
     });
 
     imageFileEl.addEventListener("change", async () => {
@@ -252,10 +338,10 @@
 
         const apiBase = normalizeBase(apiBaseEl.value);
         const apiKey = apiKeyEl.value.trim();
-        const model = modelEl.value.trim();
+        const model = getResolvedModel();
         const mode = modeEl.value.trim() || "generation";
         const prompt = promptEl.value.trim();
-        const size = sizeEl.value.trim();
+        const size = getResolvedSize();
         const quality = qualityEl.value.trim();
         const style = styleEl.value.trim();
         const response_format = responseFormatEl.value.trim();
@@ -263,7 +349,10 @@
 
         if (!apiBase) return setError("请输入 API Base，例如 https://api.openai.com");
         if (!apiKey) return setError("请输入 API Key");
+        if (!model) return setError("模型不能为空，请重新选择或填写自定义模型名");
         if (!prompt && mode !== "variation") return setError("请输入提示词 Prompt");
+
+        if (typeof size === "object" && size?.error) return setError(size.error);
 
         if (isImageToImageMode(mode)) {
             const fileErr = validateImageFile(imageFile);
@@ -272,18 +361,30 @@
 
         const url = buildEndpoint(apiBase, mode);
 
-        generateBtn.disabled = true;
+        requestController = new AbortController();
+        setGenerating(true);
         setStatus(mode === "generation" ? "正在生成图片..." : "正在处理图片...");
 
         try {
             let resp;
+            let requestDebug = null;
             if (mode === "generation") {
                 const body = { prompt };
-                if (model) body.model = model;
+                body.model = model;
                 if (size) body.size = size;
                 if (quality) body.quality = quality;
                 if (style && model === "dall-e-3") body.style = style;
                 if (response_format) body.response_format = response_format;
+
+                requestDebug = {
+                    mode,
+                    url,
+                    model: body.model,
+                    size: body.size || "",
+                    quality: body.quality || "",
+                    style: body.style || "",
+                    response_format: body.response_format || ""
+                };
 
                 resp = await fetch(url, {
                     method: "POST",
@@ -291,23 +392,34 @@
                         "Content-Type": "application/json",
                         "Authorization": `Bearer ${apiKey}`
                     },
-                    body: JSON.stringify(body)
+                    body: JSON.stringify(body),
+                    signal: requestController.signal
                 });
             } else {
                 const form = new FormData();
                 form.append("image", imageFile);
-                if (model) form.append("model", model);
+                form.append("model", model);
                 if (prompt) form.append("prompt", prompt);
                 if (size) form.append("size", size);
                 if (quality) form.append("quality", quality);
                 if (response_format) form.append("response_format", response_format);
+
+                requestDebug = {
+                    mode,
+                    url,
+                    model,
+                    size: size || "",
+                    quality: quality || "",
+                    response_format: response_format || ""
+                };
 
                 resp = await fetch(url, {
                     method: "POST",
                     headers: {
                         "Authorization": `Bearer ${apiKey}`
                     },
-                    body: form
+                    body: form,
+                    signal: requestController.signal
                 });
             }
 
@@ -315,7 +427,10 @@
             let data = null;
             try { data = JSON.parse(text); } catch (_) {}
 
-            setRaw(data || text);
+            setRaw({
+                debug_request: requestDebug,
+                response: data || text
+            });
 
             if (!resp.ok) {
                 throw new Error(`HTTP ${resp.status} - ${text}`);
@@ -338,17 +453,23 @@
             setStatus("图片生成成功。");
         } catch (err) {
             console.error(err);
-            if (String(err.message).includes("Failed to fetch")) {
+            if (err?.name === "AbortError") {
+                setError("请求已取消。");
+                setStatus("已取消当前请求。");
+            } else if (String(err.message).includes("Failed to fetch")) {
                 setError("Failed to fetch：通常是 CORS 或网络问题，必要时请改为后端代理。");
             } else {
                 setError(`生成失败：${err.message}`);
             }
-            setStatus("");
+            if (err?.name !== "AbortError") setStatus("");
         } finally {
-            generateBtn.disabled = false;
+            requestController = null;
+            setGenerating(false);
         }
     });
 
     modeEl.dispatchEvent(new Event("change"));
+    toggleCustomSizeInput();
+    loadApiConfig();
     loadAnnouncement();
 })();

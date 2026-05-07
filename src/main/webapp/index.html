@@ -91,12 +91,23 @@
         button:active { transform: translateY(0); }
         #generateBtn { background: linear-gradient(135deg, var(--brand), var(--brand-strong)); color: white; }
         #generateBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
+        #cancelBtn { background: #ef4444; color: white; }
+        #cancelBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
         #downloadBtn { background: #111827; color: white; }
         #downloadBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
+        #saveApiBtn { background: #0f766e; color: white; }
 
         .hint { color: #8a94a3; font-size: 12px; margin-top: 4px; }
         #status { color: #1e66db; margin-top: 8px; min-height: 20px; }
         #error { color: #cf1322; margin-top: 8px; white-space: pre-wrap; min-height: 20px; }
+        .custom-size {
+            margin-top: 8px;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+        .custom-size.show { display: flex; }
+        .custom-size .num-input { width: 120px; }
 
         .result img {
             max-width: 100%;
@@ -182,14 +193,19 @@
             <label for="apiKey">API Key</label>
             <div>
                 <input id="apiKey" type="password" placeholder="输入你的 API Key" />
+                <div class="hint">可点击“本地API保存”将 API Base 与 Key 保存到本机。</div>
             </div>
 
             <label for="model">模型</label>
-            <select id="model">
-                <option value="dall-e-3" selected>dall-e-3</option>
-                <option value="gpt-image-2">gpt-image-2</option>
-                <option value="dall-e-2">dall-e-2</option>
-            </select>
+            <div>
+                <select id="model">
+                    <option value="dall-e-3" selected>dall-e-3</option>
+                    <option value="gpt-image-2">gpt-image-2</option>
+                    <option value="dall-e-2">dall-e-2</option>
+                </select>
+                <input id="customModel" type="text" placeholder="自定义模型名（可选，优先于下拉）" style="margin-top:8px;" />
+                <div class="hint">若中转站模型名不同，请在此填写准确模型 ID（如 gpt-image-1）。</div>
+            </div>
 
             <label for="mode">生成模式</label>
             <select id="mode">
@@ -206,15 +222,24 @@
             </div>
 
             <label for="size">尺寸</label>
-            <select id="size">
-                <option value="1024x1024" selected>1024x1024</option>
-                <option value="1792x1024">1792x1024</option>
-                <option value="1024x1792">1024x1792</option>
-                <option value="1536x1024">1536x1024</option>
-                <option value="1024x1536">1024x1536</option>
-                <option value="512x512">512x512</option>
-                <option value="256x256">256x256</option>
-            </select>
+            <div>
+                <select id="size">
+                    <option value="1024x1024" selected>1024x1024</option>
+                    <option value="1792x1024">1792x1024</option>
+                    <option value="1024x1792">1024x1792</option>
+                    <option value="1536x1024">1536x1024</option>
+                    <option value="1024x1536">1024x1536</option>
+                    <option value="512x512">512x512</option>
+                    <option value="256x256">256x256</option>
+                    <option value="custom">自定义分辨率</option>
+                </select>
+                <div id="customSizeWrap" class="custom-size">
+                    <input id="customWidth" class="num-input" type="number" min="64" max="4096" step="1" placeholder="宽度" />
+                    <span>x</span>
+                    <input id="customHeight" class="num-input" type="number" min="64" max="4096" step="1" placeholder="高度" />
+                </div>
+                <div class="hint">自定义格式：宽x高（如 1280x720）。</div>
+            </div>
 
             <label for="quality">质量</label>
             <select id="quality">
@@ -246,7 +271,9 @@
 
         <div class="actions">
             <button id="generateBtn">生成图片</button>
+            <button id="cancelBtn" type="button" disabled>取消</button>
             <button id="downloadBtn" disabled>下载结果</button>
+            <button id="saveApiBtn" type="button">本地API保存</button>
         </div>
 
         <div id="status"></div>
