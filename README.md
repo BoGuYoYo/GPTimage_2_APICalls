@@ -8,3 +8,5 @@
 <br></br>
 <br>无需部署，下载即可使用</br>
 <br>支持官方API和中转站API</br>
+<img width="1920" height="1040" alt="f06e1aa7-3a9d-4a93-9bbd-a3ac3011b3b6" src="https://github.com/user-attachments/assets/7ca47092-2ed3-4224-b90f-b51bfb1f0d51" />
+
