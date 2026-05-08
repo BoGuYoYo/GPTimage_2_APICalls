@@ -93,8 +93,6 @@
         #generateBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
         #cancelBtn { background: #ef4444; color: white; }
         #cancelBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
-        #downloadBtn { background: #111827; color: white; }
-        #downloadBtn:disabled { opacity: 0.65; cursor: not-allowed; box-shadow: none; }
         #saveApiBtn { background: #0f766e; color: white; }
 
         .hint { color: #8a94a3; font-size: 12px; margin-top: 4px; }
@@ -142,6 +140,42 @@
             border-radius: 10px;
             margin-top: 10px;
             display: none;
+        }
+        .result-list {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .result-item {
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 8px;
+            background: #fff;
+            cursor: pointer;
+            transition: border-color .18s ease, box-shadow .18s ease;
+        }
+        .result-item:hover {
+            border-color: #c7d2fe;
+        }
+        .result-item.active {
+            border-color: #2f7cf6;
+            box-shadow: 0 0 0 2px rgba(47, 124, 246, .12);
+        }
+        .result-item img {
+            width: 100%;
+            height: 180px;
+            object-fit: cover;
+            border-radius: 8px;
+            display: block;
+            margin: 0;
+        }
+        .result-item button {
+            margin-top: 8px;
+            width: 100%;
+            background: #111827;
+            color: #fff;
+            box-shadow: none;
         }
 
         pre {
@@ -226,8 +260,8 @@
             <label for="model">模型</label>
             <div>
                 <select id="model">
-                    <option value="dall-e-3" selected>dall-e-3</option>
-                    <option value="gpt-image-2">gpt-image-2</option>
+                    <option value="gpt-image-2" selected>gpt-image-2</option>
+                    <option value="dall-e-3">dall-e-3</option>
                     <option value="dall-e-2">dall-e-2</option>
                 </select>
                 <input id="customModel" type="text" placeholder="自定义模型名（可选，优先于下拉）" style="margin-top:8px;" />
@@ -238,7 +272,7 @@
             <select id="mode">
                 <option value="generation" selected>文生图</option>
                 <option value="edit">图像编辑（图生图）</option>
-                <option value="variation">参考图变体</option>
+                <option value="variation">参考图变体（仅部分模型支持）</option>
             </select>
 
             <label for="imageFile">参考图上传</label>
@@ -292,6 +326,12 @@
                 <option value="b64_json">b64_json</option>
             </select>
 
+            <label for="imageCount">生成数量</label>
+            <div>
+                <input id="imageCount" type="number" min="1" max="10" step="1" value="1" />
+                <div class="hint">一次请求返回多张图（由模型/服务端决定最大值）。</div>
+            </div>
+
             <label for="prompt">提示词</label>
             <textarea id="prompt" placeholder="例如：一只可爱的小海獭在湖边晒太阳，插画风，高细节，柔和光线"></textarea>
         </div>
@@ -299,7 +339,6 @@
         <div class="actions">
             <button id="generateBtn">生成图片</button>
             <button id="cancelBtn" type="button" disabled>取消</button>
-            <button id="downloadBtn" disabled>下载结果</button>
             <button id="saveApiBtn" type="button">本地API保存</button>
         </div>
 
@@ -311,6 +350,7 @@
     <div class="card result">
         <h3>生成结果</h3>
         <img id="resultImg" alt="生成结果" />
+        <div id="resultList" class="result-list"></div>
         <h4>原始响应</h4>
         <pre id="rawOutput"></pre>
     </div>

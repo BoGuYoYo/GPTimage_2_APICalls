@@ -12,16 +12,17 @@
     const qualityEl = $("quality");
     const styleEl = $("style");
     const responseFormatEl = $("responseFormat");
+    const imageCountEl = $("imageCount");
     const imageFileEl = $("imageFile");
 
     const generateBtn = $("generateBtn");
     const cancelBtn = $("cancelBtn");
-    const downloadBtn = $("downloadBtn");
     const saveApiBtn = $("saveApiBtn");
     const statusEl = $("status");
     const errorEl = $("error");
     const sourcePreviewListEl = $("sourcePreviewList");
     const resultImgEl = $("resultImg");
+    const resultListEl = $("resultList");
     const rawOutputEl = $("rawOutput");
     const customSizeWrapEl = $("customSizeWrap");
     const customWidthEl = $("customWidth");
@@ -30,11 +31,12 @@
     const noticeContentEl = $("noticeContent");
     const noticeCloseBtnEl = $("noticeCloseBtn");
     const API_STORAGE_KEY = "openai-image-local-api-v1";
+    const DEFAULT_IMAGE_MODEL = "gpt-image-2";
 
     const requiredIds = [
-        "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageFile",
-        "generateBtn", "cancelBtn", "downloadBtn", "saveApiBtn", "status", "error", "sourcePreviewList", "resultImg", "rawOutput",
-        "customSizeWrap", "customWidth", "customHeight",
+        "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageCount", "imageFile",
+        "generateBtn", "cancelBtn", "saveApiBtn", "status", "error", "sourcePreviewList", "resultImg", "rawOutput",
+        "customSizeWrap", "customWidth", "customHeight", "resultList",
         "noticeMask", "noticeContent", "noticeCloseBtn"
     ];
     const missing = requiredIds.filter(id => !$(id));
@@ -56,6 +58,7 @@
     function resetImage() {
         resultImgEl.src = "";
         resultImgEl.style.display = "none";
+        resultListEl.innerHTML = "";
     }
     function resetSourcePreview() {
         sourcePreviewListEl.innerHTML = "";
@@ -84,12 +87,54 @@
         resultImgEl.src = src;
         resultImgEl.style.display = "block";
     }
+    function renderResultList(images) {
+        resultListEl.innerHTML = "";
+        images.forEach((src, idx) => {
+            const card = document.createElement("div");
+            card.className = "result-item";
+            if (idx === 0) card.classList.add("active");
 
-    let lastResultImageSrc = "";
-    function setLastResultImage(src) {
-        lastResultImageSrc = src || "";
-        downloadBtn.disabled = !lastResultImageSrc;
+            const img = document.createElement("img");
+            img.src = src;
+            img.alt = `结果图 ${idx + 1}`;
+            img.title = `点击查看第 ${idx + 1} 张`;
+
+            const selectThisImage = () => {
+                showImage(src);
+                const items = resultListEl.querySelectorAll(".result-item");
+                items.forEach((it, i) => it.classList.toggle("active", i === idx));
+                setStatus(`正在查看第 ${idx + 1} 张。`);
+            };
+            card.addEventListener("click", selectThisImage);
+
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = `下载第 ${idx + 1} 张`;
+            btn.addEventListener("click", async (e) => {
+                // Prevent card click from firing when pressing download.
+                e?.stopPropagation?.();
+                setError("");
+                try {
+                    const ext = guessExtFromImageSrc(src);
+                    const fileName = `generated-${idx + 1}-${Date.now()}.${ext}`;
+                    if (window.electronAPI?.downloadImage) {
+                        const ret = await window.electronAPI.downloadImage(src, fileName);
+                        if (!ret?.ok) throw new Error(ret?.error || "下载失败");
+                    } else {
+                        await downloadInBrowser(src, fileName);
+                    }
+                    setStatus(`第 ${idx + 1} 张下载成功。`);
+                } catch (e) {
+                    setError(`下载失败：${e?.message || String(e)}`);
+                }
+            });
+
+            card.appendChild(img);
+            card.appendChild(btn);
+            resultListEl.appendChild(card);
+        });
     }
+
     function isImageToImageMode(mode) {
         return mode === "edit" || mode === "variation";
     }
@@ -135,10 +180,32 @@
         const optionText = String(selected?.value || selected?.text || "").trim();
         return optionText;
     }
+    function getModelForMode(rawModel, mode) {
+        let model = String(rawModel || "").trim();
+        if (!model) model = DEFAULT_IMAGE_MODEL;
+        // Many compatible gateways only accept dall-e-2 for variations.
+        if (mode === "variation" && model === "dall-e-3") {
+            model = "dall-e-2";
+        }
+        return model;
+    }
     function toPositiveInt(v) {
         const n = Number(v);
         if (!Number.isInteger(n) || n <= 0) return 0;
         return n;
+    }
+    function getResolvedImageCount() {
+        const n = toPositiveInt(imageCountEl.value);
+        if (!n) return { error: "生成数量必须是正整数" };
+        if (n > 10) return { error: "生成数量不能超过 10" };
+        return n;
+    }
+    function validateImageCountForModel(mode, model, imageCount) {
+        // OpenAI-compatible behavior: dall-e-3 generation often only supports n=1.
+        if (mode === "generation" && model === "dall-e-3" && imageCount > 1) {
+            return "dall-e-3 通常仅支持一次 1 张图。请改用 dall-e-2 / gpt-image-2，或把生成数量改为 1。";
+        }
+        return "";
     }
     function toggleCustomSizeInput() {
         const useCustom = sizeEl.value === "custom";
@@ -282,29 +349,6 @@
         }
     });
 
-    downloadBtn.addEventListener("click", async () => {
-        setError("");
-        if (!lastResultImageSrc) {
-            setError("暂无可下载的结果图片");
-            return;
-        }
-
-        const ext = guessExtFromImageSrc(lastResultImageSrc);
-        const fileName = `generated-${Date.now()}.${ext}`;
-
-        try {
-            if (window.electronAPI?.downloadImage) {
-                const ret = await window.electronAPI.downloadImage(lastResultImageSrc, fileName);
-                if (!ret?.ok) throw new Error(ret?.error || "下载失败");
-            } else {
-                await downloadInBrowser(lastResultImageSrc, fileName);
-            }
-            setStatus("图片下载成功。");
-        } catch (e) {
-            setError(`下载失败：${e?.message || String(e)}`);
-        }
-    });
-
     modeEl.addEventListener("change", () => {
         const mode = modeEl.value;
         const needsImage = isImageToImageMode(mode);
@@ -361,23 +405,26 @@
         setStatus("");
         setRaw("");
         resetImage();
-        setLastResultImage("");
 
         const apiBase = normalizeBase(apiBaseEl.value);
         const apiKey = apiKeyEl.value.trim();
-        const model = getResolvedModel();
+        const model = getModelForMode(getResolvedModel(), modeEl.value.trim() || "generation");
         const mode = modeEl.value.trim() || "generation";
         const prompt = promptEl.value.trim();
         const size = getResolvedSize();
         const quality = qualityEl.value.trim();
         const style = styleEl.value.trim();
         const response_format = responseFormatEl.value.trim();
+        const imageCount = getResolvedImageCount();
         const imageFiles = getImageFiles();
 
         if (!apiBase) return setError("请输入 API Base，例如 https://api.openai.com");
         if (!apiKey) return setError("请输入 API Key");
         if (!model) return setError("模型不能为空，请重新选择或填写自定义模型名");
         if (!prompt && mode !== "variation") return setError("请输入提示词 Prompt");
+        if (typeof imageCount === "object" && imageCount?.error) return setError(imageCount.error);
+        const countModelErr = validateImageCountForModel(mode, model, imageCount);
+        if (countModelErr) return setError(countModelErr);
 
         if (typeof size === "object" && size?.error) return setError(size.error);
 
@@ -393,95 +440,123 @@
         setStatus(mode === "generation" ? "正在生成图片..." : `正在处理图片（${imageFiles.length || 1} 张）...`);
 
         try {
-            let resp;
-            let requestDebug = null;
-            if (mode === "generation") {
-                const body = { prompt };
-                body.model = model;
-                if (size) body.size = size;
-                if (quality) body.quality = quality;
-                if (style && model === "dall-e-3") body.style = style;
-                if (response_format) body.response_format = response_format;
+            const sendOnce = async (requestedN) => {
+                let resp;
+                let requestDebug = null;
+                if (mode === "generation") {
+                    const body = { prompt };
+                    body.model = model;
+                    if (size) body.size = size;
+                    if (quality) body.quality = quality;
+                    if (style && model === "dall-e-3") body.style = style;
+                    if (response_format) body.response_format = response_format;
+                    if (requestedN > 1) body.n = requestedN;
 
-                requestDebug = {
-                    mode,
-                    url,
-                    model: body.model,
-                    size: body.size || "",
-                    quality: body.quality || "",
-                    style: body.style || "",
-                    response_format: body.response_format || ""
-                };
+                    requestDebug = {
+                        mode,
+                        url,
+                        model: body.model,
+                        size: body.size || "",
+                        quality: body.quality || "",
+                        style: body.style || "",
+                        response_format: body.response_format || "",
+                        n: body.n || 1
+                    };
 
-                resp = await fetch(url, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                        "Authorization": `Bearer ${apiKey}`
-                    },
-                    body: JSON.stringify(body),
-                    signal: requestController.signal
-                });
-            } else {
-                const form = new FormData();
-                for (const file of imageFiles) {
-                    form.append("image", file);
+                    resp = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "Authorization": `Bearer ${apiKey}`
+                        },
+                        body: JSON.stringify(body),
+                        signal: requestController.signal
+                    });
+                } else {
+                    const form = new FormData();
+                    for (const file of imageFiles) {
+                        form.append("image", file);
+                    }
+                    form.append("model", String(model));
+                    if (prompt) form.append("prompt", prompt);
+                    if (size) form.append("size", size);
+                    if (quality) form.append("quality", quality);
+                    if (response_format) form.append("response_format", response_format);
+                    if (requestedN > 1) form.append("n", String(requestedN));
+
+                    requestDebug = {
+                        mode,
+                        url,
+                        model,
+                        image_count: imageFiles.length,
+                        image_names: imageFiles.map(f => f.name),
+                        size: size || "",
+                        quality: quality || "",
+                        response_format: response_format || "",
+                        n: requestedN
+                    };
+
+                    resp = await fetch(url, {
+                        method: "POST",
+                        headers: {
+                            "Authorization": `Bearer ${apiKey}`
+                        },
+                        body: form,
+                        signal: requestController.signal
+                    });
                 }
-                form.append("model", model);
-                if (prompt) form.append("prompt", prompt);
-                if (size) form.append("size", size);
-                if (quality) form.append("quality", quality);
-                if (response_format) form.append("response_format", response_format);
 
-                requestDebug = {
-                    mode,
-                    url,
-                    model,
-                    image_count: imageFiles.length,
-                    image_names: imageFiles.map(f => f.name),
-                    size: size || "",
-                    quality: quality || "",
-                    response_format: response_format || ""
-                };
+                const text = await resp.text();
+                let data = null;
+                try { data = JSON.parse(text); } catch (_) {}
 
-                resp = await fetch(url, {
-                    method: "POST",
-                    headers: {
-                        "Authorization": `Bearer ${apiKey}`
-                    },
-                    body: form,
-                    signal: requestController.signal
-                });
+                if (!resp.ok) {
+                    throw new Error(`HTTP ${resp.status} - ${text}`);
+                }
+
+                const items = Array.isArray(data?.data) ? data.data : [];
+                const urls = [];
+                for (const item of items) {
+                    if (item?.url) urls.push(item.url);
+                    else if (item?.b64_json) urls.push(`data:image/png;base64,${item.b64_json}`);
+                }
+                return { requestDebug, raw: data || text, urls };
+            };
+
+            const rounds = [];
+            const firstRound = await sendOnce(imageCount);
+            rounds.push(firstRound);
+            const imageSrcList = [...firstRound.urls];
+
+            // Compatibility fallback: some gateways ignore "n" for edit/variation and always return 1 image.
+            if (isImageToImageMode(mode) && imageCount > imageSrcList.length) {
+                let remain = imageCount - imageSrcList.length;
+                while (remain > 0) {
+                    const oneRound = await sendOnce(1);
+                    rounds.push(oneRound);
+                    if (!oneRound.urls.length) break;
+                    imageSrcList.push(...oneRound.urls.slice(0, remain));
+                    remain = imageCount - imageSrcList.length;
+                }
             }
-
-            const text = await resp.text();
-            let data = null;
-            try { data = JSON.parse(text); } catch (_) {}
 
             setRaw({
-                debug_request: requestDebug,
-                response: data || text
+                debug_requests: rounds.map(r => r.requestDebug),
+                requested_count: imageCount,
+                returned_count: imageSrcList.length,
+                responses: rounds.map(r => r.raw)
             });
 
-            if (!resp.ok) {
-                throw new Error(`HTTP ${resp.status} - ${text}`);
+            if (!imageSrcList.length) {
+                throw new Error("返回中没有可展示的 url 或 b64_json");
             }
-
-            const item = data?.data?.[0];
-            if (!item) throw new Error("返回中没有 data[0]");
-
-            if (item.url) {
-                showImage(item.url);
-                setLastResultImage(item.url);
-            } else if (item.b64_json) {
-                const dataUrl = `data:image/png;base64,${item.b64_json}`;
-                showImage(dataUrl);
-                setLastResultImage(dataUrl);
+            showImage(imageSrcList[0]);
+            renderResultList(imageSrcList);
+            if (imageCount > imageSrcList.length) {
+                setStatus(`图片已生成，但仅返回 ${imageSrcList.length}/${imageCount} 张（模型或网关可能不支持多图）。`);
             } else {
-                throw new Error("返回中没有 url 或 b64_json");
+                setStatus(`图片生成成功，共 ${imageSrcList.length} 张。`);
             }
-
-            setStatus("图片生成成功。");
         } catch (err) {
             console.error(err);
             if (err?.name === "AbortError") {
