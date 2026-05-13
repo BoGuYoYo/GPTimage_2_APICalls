@@ -332,6 +332,15 @@
                 <div class="hint">一次请求返回多张图（由模型/服务端决定最大值）。</div>
             </div>
 
+            <label for="retryUntilSuccess">失败处理</label>
+            <div>
+                <label style="display:flex;align-items:center;gap:8px;">
+                    <input id="retryUntilSuccess" type="checkbox" style="width:auto;" />
+                    <span>失败后最多自动重试 6 次（可点“取消”中断）</span>
+                </label>
+                <div class="hint">仅适用于临时网络波动、网关超时等场景；达到上限会停止，避免持续消耗。</div>
+            </div>
+
             <label for="prompt">提示词</label>
             <textarea id="prompt" placeholder="例如：一只可爱的小海獭在湖边晒太阳，插画风，高细节，柔和光线"></textarea>
         </div>

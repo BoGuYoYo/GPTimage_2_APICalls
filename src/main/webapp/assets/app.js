@@ -13,6 +13,7 @@
     const styleEl = $("style");
     const responseFormatEl = $("responseFormat");
     const imageCountEl = $("imageCount");
+    const retryUntilSuccessEl = $("retryUntilSuccess");
     const imageFileEl = $("imageFile");
 
     const generateBtn = $("generateBtn");
@@ -32,9 +33,10 @@
     const noticeCloseBtnEl = $("noticeCloseBtn");
     const API_STORAGE_KEY = "openai-image-local-api-v1";
     const DEFAULT_IMAGE_MODEL = "gpt-image-2";
+    const MAX_AUTO_RETRIES = 6;
 
     const requiredIds = [
-        "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageCount", "imageFile",
+        "apiBase", "apiKey", "model", "customModel", "mode", "prompt", "size", "quality", "style", "responseFormat", "imageCount", "retryUntilSuccess", "imageFile",
         "generateBtn", "cancelBtn", "saveApiBtn", "status", "error", "sourcePreviewList", "resultImg", "rawOutput",
         "customSizeWrap", "customWidth", "customHeight", "resultList",
         "noticeMask", "noticeContent", "noticeCloseBtn"
@@ -168,6 +170,45 @@
 
     function normalizeBase(url) {
         return (url || "").trim().replace(/\/+$/, "");
+    }
+    function sleep(ms, signal) {
+        return new Promise((resolve, reject) => {
+            if (signal?.aborted) {
+                const abortErr = new Error("请求已取消");
+                abortErr.name = "AbortError";
+                reject(abortErr);
+                return;
+            }
+            const timer = setTimeout(() => {
+                signal?.removeEventListener?.("abort", onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timer);
+                const abortErr = new Error("请求已取消");
+                abortErr.name = "AbortError";
+                reject(abortErr);
+            };
+            signal?.addEventListener?.("abort", onAbort, { once: true });
+        });
+    }
+    function isRetryableError(err) {
+        const status = Number(err?.status || 0);
+        if (status === 408 || status === 429) return true;
+        if (status >= 500 && status <= 599) return true;
+        const msg = String(err?.message || "");
+        return msg.includes("Failed to fetch") || msg.includes("NetworkError") || msg.includes("网络");
+    }
+    function getRetryDelayMs(err, attempt) {
+        // Respect gateway hint first (seconds), then fall back to exponential backoff with jitter.
+        const retryAfterRaw = err?.retryAfter;
+        const retryAfter = Number(retryAfterRaw);
+        if (Number.isFinite(retryAfter) && retryAfter > 0) {
+            return Math.min(30000, Math.max(1000, Math.round(retryAfter * 1000)));
+        }
+        const base = Math.min(30000, 1000 * Math.pow(2, Math.max(0, attempt - 1)));
+        const jitter = Math.floor(Math.random() * 500);
+        return base + jitter;
     }
     function getResolvedModel() {
         const custom = String(customModelEl.value || "").trim();
@@ -364,7 +405,6 @@
     cancelBtn.addEventListener("click", () => {
         if (!requestController) return;
         requestController.abort();
-        requestController = null;
         setStatus("已取消当前请求。");
         setGenerating(false);
     });
@@ -416,6 +456,7 @@
         const style = styleEl.value.trim();
         const response_format = responseFormatEl.value.trim();
         const imageCount = getResolvedImageCount();
+        const retryUntilSuccess = !!retryUntilSuccessEl.checked;
         const imageFiles = getImageFiles();
 
         if (!apiBase) return setError("请输入 API Base，例如 https://api.openai.com");
@@ -511,7 +552,10 @@
                 try { data = JSON.parse(text); } catch (_) {}
 
                 if (!resp.ok) {
-                    throw new Error(`HTTP ${resp.status} - ${text}`);
+                    const httpErr = new Error(`HTTP ${resp.status} - ${text}`);
+                    httpErr.status = resp.status;
+                    httpErr.retryAfter = resp.headers?.get?.("retry-after");
+                    throw httpErr;
                 }
 
                 const items = Array.isArray(data?.data) ? data.data : [];
@@ -523,8 +567,28 @@
                 return { requestDebug, raw: data || text, urls };
             };
 
+            let autoRetryCount = 0;
+            const sendWithAutoRetry = async (requestedN, label) => {
+                while (true) {
+                    try {
+                        return await sendOnce(requestedN);
+                    } catch (err) {
+                        if (err?.name === "AbortError") throw err;
+                        if (!retryUntilSuccess) throw err;
+                        if (!isRetryableError(err)) throw err;
+                        if (autoRetryCount >= MAX_AUTO_RETRIES) {
+                            throw new Error(`已达到自动重试上限（${MAX_AUTO_RETRIES} 次）。最后错误：${err?.message || String(err)}`);
+                        }
+                        autoRetryCount += 1;
+                        const waitMs = getRetryDelayMs(err, autoRetryCount);
+                        setStatus(`${label}第 ${autoRetryCount} 次失败（${err?.message || "未知错误"}），${Math.round(waitMs / 1000)} 秒后自动重试...`);
+                        await sleep(waitMs, requestController?.signal);
+                    }
+                }
+            };
+
             const rounds = [];
-            const firstRound = await sendOnce(imageCount);
+            const firstRound = await sendWithAutoRetry(imageCount, "主请求");
             rounds.push(firstRound);
             const imageSrcList = [...firstRound.urls];
 
@@ -532,7 +596,7 @@
             if (isImageToImageMode(mode) && imageCount > imageSrcList.length) {
                 let remain = imageCount - imageSrcList.length;
                 while (remain > 0) {
-                    const oneRound = await sendOnce(1);
+                    const oneRound = await sendWithAutoRetry(1, `补图请求（还差 ${remain} 张）`);
                     rounds.push(oneRound);
                     if (!oneRound.urls.length) break;
                     imageSrcList.push(...oneRound.urls.slice(0, remain));
